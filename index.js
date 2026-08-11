@@ -1,6 +1,6 @@
 // ==========================
 //  Cloudflare Worker 后端
-//  justsolo 音乐播放器 - 日志收集与查看
+//  Just Solo 音乐播放器 - 日志收集与查看
 //  固定单线程（source = '主线程'）
 //  依赖 D1 绑定 (binding = "DB")
 //  环境变量：PWD（删除密码）
@@ -26,10 +26,9 @@ export default {
     if (path === '/submit' && method === 'POST') {
       try {
         const logData = await request.json();
-        // 注意：请求中的 source 字段将被忽略，固定为 "主线程"
         const { time, type, content, traceback } = logData;
 
-        // 固定线程名为 "主线程"（单线程）
+        // 固定为单线程
         const source = '主线程';
 
         const userAgent = request.headers.get('User-Agent') || '';
@@ -148,7 +147,7 @@ export default {
       );
     }
 
-    // ---------- 4. 删除日志（含详细日志） ----------
+    // ---------- 4. 删除日志 ----------
     if (path === '/delete' && method === 'POST') {
       try {
         console.log('[删除] 读取 PWD 环境变量:', env.PWD ? '已设置 (长度=' + env.PWD.length + ')' : '未定义');
@@ -231,7 +230,7 @@ export default {
   },
 };
 
-// ========== HTML 渲染函数（内容列显示“📄 详情”按钮） ==========
+// ========== HTML 渲染函数（含 Logo） ==========
 function renderDashboard(logs, pagination) {
   const { page, totalPages, totalItems, type, typeOptions } = pagination;
 
@@ -276,13 +275,15 @@ function renderDashboard(logs, pagination) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🎵 justsolo 音乐播放器 - 日志监控</title>
+  <title>🎵 Just Solo 音乐播放器 - 日志监控</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Inter', -apple-system, sans-serif; background: #f4f6f9; padding: 30px; color: #1e293b; }
     .container { max-width: 1400px; margin: 0 auto; }
     .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px; }
-    h1 { font-size: 28px; font-weight: 700; background: linear-gradient(135deg, #7c3aed, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand img { height: 40px; width: auto; }
+    .brand h1 { font-size: 28px; font-weight: 700; color: #7c3aed; margin: 0; background: none; -webkit-text-fill-color: #7c3aed; }
     .stats { background: white; padding: 15px 25px; border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; }
     .stats span { font-weight: 700; color: #0f172a; }
     .filters { background: white; padding: 15px 25px; border-radius: 16px; margin-bottom: 25px; display: flex; gap: 20px; align-items: center; flex-wrap: wrap; border: 1px solid #e2e8f0; }
@@ -403,7 +404,10 @@ function renderDashboard(logs, pagination) {
 <body>
 <div class="container">
   <div class="header">
-    <h1>🎵 justsolo 音乐播放器 – 日志监控</h1>
+    <div class="brand">
+      <img src="https://zzjjack.us.kg/img/Just-Solo.png" alt="Just Solo">
+      <h1>Just Solo 音乐播放器 – 日志监控</h1>
+    </div>
     <div class="stats">📊 当前显示 <span>${logs.length}</span> 条 · 总计 <span>${totalItems}</span> 条</div>
   </div>
 
