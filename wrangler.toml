@@ -1,0 +1,13 @@
+# wrangler.toml
+name = 'just-solo-bug-server'
+main = "index.js"
+compatibility_date = "2026-08-11"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "justsolo-bug-db"
+database_id = "fff742cd-0190-43e5-a3c3-2317982cea72"
+
+[observability.logs]
+enabled = true
+invocation_logs = true
