@@ -4,6 +4,7 @@
 //  固定单线程（source = '主线程'）
 //  依赖 D1 绑定 (binding = "DB")
 //  环境变量：PWD（删除密码）
+//  时间统一：所有时间戳按 TIMEZONE 格式化，避免时区错位
 // ==========================
 
 const CORS_HEADERS = {
@@ -11,6 +12,49 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, DELETE',
   'Access-Control-Allow-Headers': 'Content-Type, User-Agent',
 };
+
+// ==========================
+//  统一时区格式化
+//  SQLite CURRENT_TIMESTAMP 存的是 UTC、且无时区后缀，
+//  这里统一解析为 Date 并按固定时区格式化为字符串。
+//  想换时区只改这一行即可。
+// ==========================
+const TIMEZONE = 'Asia/Shanghai';
+
+function parseSqliteUtc(value) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+  if (typeof value === 'number') {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const s = String(value).trim();
+  // SQLite 默认格式：'YYYY-MM-DD HH:MM:SS'（UTC，无后缀）
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(\.\d+)?$/);
+  if (m) {
+    const ms = m[7] ? Math.round(parseFloat(m[7]) * 1000) : 0;
+    const d = new Date(Date.UTC(
+      +m[1], +m[2] - 1, +m[3],
+      +m[4], +m[5], +m[6], ms
+    ));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function formatInTz(value, tz = TIMEZONE) {
+  const d = parseSqliteUtc(value);
+  if (!d) return value == null ? '未知' : String(value);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(d);
+  const get = (t) => parts.find((p) => p.type === t)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
+}
 
 export default {
   async fetch(request, env) {
@@ -48,7 +92,7 @@ export default {
            VALUES (?, ?, ?, ?, ?, ?) RETURNING id`
         ).bind(
           source,
-          time || new Date().toLocaleString(),
+          time || formatInTz(new Date()),
           type,
           content,
           traceback || '',
@@ -141,8 +185,15 @@ export default {
       const { results } = await env.DB.prepare(sql)
         .bind(...bindParams, limit, offset)
         .all();
+
+      // API 也补一个统一格式化的字段，方便前端直接使用
+      const data = (results || []).map((r) => ({
+        ...r,
+        created_at_fmt: formatInTz(r.created_at),
+      }));
+
       return Response.json(
-        { success: true, data: results, page, limit },
+        { success: true, data, page, limit },
         { headers: CORS_HEADERS }
       );
     }
@@ -169,7 +220,7 @@ export default {
         }
 
         if (password !== correctPassword) {
-          console.warn('[删除] 密码错误: 输入密码长度=' + password.length + ', 正确密码长度=' + correctPassword.length);
+          console.warn('[删除] 密码错误: 输入密码长度=' + (password ? password.length : 0) + ', 正确密码长度=' + correctPassword.length);
           return Response.json(
             { success: false, error: '密码错误' },
             { status: 401, headers: CORS_HEADERS }
@@ -234,9 +285,15 @@ export default {
 function renderDashboard(logs, pagination) {
   const { page, totalPages, totalItems, type, typeOptions } = pagination;
 
-  const logsJson = JSON.stringify(logs);
+  // 服务端一次性按统一时区格式化，客户端直接显示字符串，避免再解析
+  const enrichedLogs = logs.map((b) => ({
+    ...b,
+    created_at_fmt: formatInTz(b.created_at),
+  }));
 
-  const rows = logs
+  const logsJson = JSON.stringify(enrichedLogs);
+
+  const rows = enrichedLogs
     .map(
       (b) => `
     <tr>
@@ -247,7 +304,7 @@ function renderDashboard(logs, pagination) {
       <td><span class="badge">${b.type}</span></td>
       <td><button class="detail-btn" data-id="${b.id}">📄 详情</button></td>
       <td style="font-size:12px; color:#666;">${b.version || '未知'}</td>
-      <td style="font-size:12px; color:#666;">${new Date(b.created_at).toLocaleString('zh-CN')}</td>
+      <td style="font-size:12px; color:#666;">${b.created_at_fmt}</td>
     </tr>
   `
     )
@@ -471,20 +528,30 @@ function renderDashboard(logs, pagination) {
 <script>
   const logsData = ${logsJson};
 
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function openDetail(id) {
     const log = logsData.find(b => b.id === id);
     if (!log) return;
 
     const content = document.getElementById('modalContent');
     content.innerHTML = \`
-      <div class="modal-field"><strong>ID：</strong><span class="value">\${log.id}</span></div>
-      <div class="modal-field"><strong>来源：</strong><span class="value">\${log.source || '未知'}</span></div>
-      <div class="modal-field"><strong>播放时间：</strong><span class="value">\${log.time}</span></div>
-      <div class="modal-field"><strong>事件类型：</strong><span class="value">\${log.type}</span></div>
-      <div class="modal-field"><strong>版本：</strong><span class="value">\${log.version || '未知'}</span></div>
-      <div class="modal-field"><strong>接收时间：</strong><span class="value">\${new Date(log.created_at).toLocaleString('zh-CN')}</span></div>
-      <div class="modal-field"><strong>事件内容：</strong><div class="value" style="background:#f8fafc;padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-all;">\${log.content}</div></div>
-      <div class="modal-field"><strong>完整堆栈：</strong><div class="traceback">\${log.traceback || '无堆栈信息'}</div></div>
+      <div class="modal-field"><strong>ID：</strong><span class="value">\${escapeHtml(log.id)}</span></div>
+      <div class="modal-field"><strong>来源：</strong><span class="value">\${escapeHtml(log.source || '未知')}</span></div>
+      <div class="modal-field"><strong>播放时间：</strong><span class="value">\${escapeHtml(log.time)}</span></div>
+      <div class="modal-field"><strong>事件类型：</strong><span class="value">\${escapeHtml(log.type)}</span></div>
+      <div class="modal-field"><strong>版本：</strong><span class="value">\${escapeHtml(log.version || '未知')}</span></div>
+      <div class="modal-field"><strong>接收时间：</strong><span class="value">\${escapeHtml(log.created_at_fmt)}</span></div>
+      <div class="modal-field"><strong>事件内容：</strong><div class="value" style="background:#f8fafc;padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-all;">\${escapeHtml(log.content)}</div></div>
+      <div class="modal-field"><strong>完整堆栈：</strong><div class="traceback">\${escapeHtml(log.traceback || '无堆栈信息')}</div></div>
     \`;
     document.getElementById('detailModal').classList.add('active');
   }
